@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Production Entry</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#1a73e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Production">
+<style>
+  *{box-sizing:border-box}
+  body{font-family:Arial,sans-serif;margin:0;background:#f4f6f8;color:#222}
+  .wrap{max-width:440px;margin:auto;padding:6px 10px 10px}
+  h1{font-size:16px;color:#1a73e8;margin:0 0 6px}
+  .top{display:flex;gap:6px}
+  .top input{flex:1.7;font-size:15px;padding:6px 4px;border:1px solid #c8c8c8;border-radius:8px;background:#fff;min-width:0}
+  .sb{flex:1;font-size:15px;padding:6px 0;border:2px solid #1a73e8;background:#fff;color:#1a73e8;border-radius:8px}
+  .sb.on{background:#1a73e8;color:#fff}
+  .tabs{display:flex;margin-top:8px;border-bottom:2px solid #ddd}
+  .tab{flex:1;font-size:15px;padding:8px 0;border:0;background:none;color:#555;font-weight:bold;border-bottom:3px solid transparent;margin-bottom:-2px}
+  .tab.on{color:#188038;border-bottom-color:#188038}
+  .row{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .row label{flex:1;font-weight:bold;font-size:14px}
+  .row input{flex:1;font-size:18px;padding:7px;border:1px solid #c8c8c8;border-radius:8px;background:#fff;min-width:0}
+  .live{font-size:12px;color:#555;margin-top:2px;line-height:1.35}
+  .live b{color:#188038}
+  .live .chg{color:#b06000;font-weight:bold}
+  .live .warn{color:#c5221f;font-weight:bold}
+  .card{background:#fff;border-radius:8px;padding:6px 8px;margin-top:8px;font-size:13px;box-shadow:0 1px 3px rgba(0,0,0,.12)}
+  .card b{color:#188038;font-size:15px}
+  #save{width:100%;margin-top:10px;font-size:19px;padding:12px;background:#188038;color:#fff;border:0;border-radius:8px}
+  #save:disabled{background:#9e9e9e}
+  #msg{margin-top:6px;font-size:14px;text-align:center;white-space:pre-line;min-height:18px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Qatalum – Daily Production</h1>
+  <div class="top">
+    <input type="date" id="date">
+    <button class="sb on" id="Day">Day</button><button class="sb" id="Night">Night</button>
+  </div>
+  <div class="tabs"><button class="tab on" id="t_p">Production</button><button class="tab" id="t_c">Counters</button></div>
+  <div id="fields"></div>
+  <div class="card" id="sum"></div>
+  <button id="save">Save all</button>
+  <div id="msg"></div>
+</div>
+<script>
+  const F = [
+    ['cages', 'Complete cages', 'p', 'qty'],
+    ['spn', 'Spider rings normal', 'p', 'qty'],
+    ['spi', 'Spider rings inverted', 'p', 'qty'],
+    ['arms', 'Arms counter', 'c', 'ctr'],
+    ['small', 'Small rings counter', 'c', 'ctr'],
+    ['wire', 'Long wire counter', 'c', 'ctr']
+  ];
+  let shift = 'Day', tab = 'p', live = null;
+  const $ = id => document.getElementById(id);
+  const pad = n => String(n).padStart(2, '0');
+  const fmt = n => Number(n).toLocaleString('en-US');
+  const t = new Date();
+  $('date').value = t.getFullYear() + '-' + pad(t.getMonth() + 1) + '-' + pad(t.getDate());
+  $('date').max = $('date').value;
+
+  let h = '';
+  F.forEach(f => {
+    h += '<div class="g_' + f[2] + '"><div class="row"><label for="f_' + f[0] + '">' + f[1] + '</label>' +
+         '<input type="number" inputmode="numeric" min="0" id="f_' + f[0] + '"></div>' +
+         '<div class="live" id="l_' + f[0] + '"></div></div>';
+  });
+  $('fields').innerHTML = h;
+  F.forEach(f => $('f_' + f[0]).oninput = calc);
+
+  function setTab(x) {
+    tab = x;
+    $('t_p').classList.toggle('on', x === 'p');
+    $('t_c').classList.toggle('on', x === 'c');
+    document.querySelectorAll('.g_p').forEach(e => e.style.display = x === 'p' ? '' : 'none');
+    document.querySelectorAll('.g_c').forEach(e => e.style.display = x === 'c' ? '' : 'none');
+    $('sum').style.display = x === 'p' ? '' : 'none';
+  }
+  $('t_p').onclick = () => setTab('p');
+  $('t_c').onclick = () => setTab('c');
+
+  const num = v => (v === '' || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
+  const made = (reading, prev) => reading === null ? 0 : (prev === null || reading < prev ? reading : reading - prev);
+
+  function calc() {
+    if (!live) return;
+    const after = {};
+    F.forEach(f => {
+      const k = f[0], el = $('f_' + k), out = $('l_' + k);
+      const saved = num(live.entry[k]), typed = num(el.value), total = live.totals[k];
+      let txt = '';
+      if (f[3] === 'qty') {
+        const a = total + (typed || 0);
+        after[k] = a;
+        txt = 'Balance ' + fmt(total) + (typed !== null ? ' + ' + fmt(typed) + ' = <b>' + fmt(a) + '</b>' : '') +
+              (saved ? '<br><span class="chg">Already entered this shift: ' + fmt(saved) + ' (added to it)</span>' : '');
+      } else {
+        const prev = num(live.prev[k]);
+        const mSaved = made(saved, prev), mNew = made(typed, prev);
+        const a = total - mSaved + mNew;
+        after[k] = a;
+        txt = 'Prev reading ' + (prev === null ? '—' : fmt(prev)) + (typed !== null ? ' · made <b>' + fmt(mNew) + '</b>' : '') +
+              '<br>Balance ' + fmt(total) + (typed !== null ? ' → <b>' + fmt(a) + '</b>' : '');
+        if (typed !== null && prev !== null && typed < prev)
+          txt += '<br><span class="warn">Lower than previous – counter reset? Counted as ' + fmt(typed) + '</span>';
+        if (saved !== null) txt += '<br><span class="chg">Already entered today: ' + fmt(saved) + ' (replaced)</span>';
+      }
+      out.innerHTML = txt;
+    });
+    const cnt = g => F.filter(f => f[2] === g && $('f_' + f[0]).value !== '').length;
+    $('t_p').textContent = 'Production' + (cnt('p') ? ' (' + cnt('p') + ')' : '');
+    $('t_c').textContent = 'Counters' + (cnt('c') ? ' (' + cnt('c') + ')' : '');
+    const rem = Math.max(0, live.totals.order - after.cages);
+    const pct = live.totals.order ? (after.cages / live.totals.order * 100).toFixed(1) : 0;
+    $('sum').innerHTML = 'Cages made <b>' + fmt(after.cages) + '</b> / ' + fmt(live.totals.order) +
+      ' · Remaining <b>' + fmt(rem) + '</b> · ' + pct + '%';
+  }
+
+  const API = 'https://script.google.com/macros/s/AKfycbygNAt3BORXl47Th-s4sZRiKSNW2JOc41o0_X8EKrmaKXAyeasuz9aBH6pxGldeKZtzDg/exec';
+  const call = p => fetch(API + '?' + new URLSearchParams(p), { credentials: 'omit' })
+    .then(r => r.json()).then(j => { if (j.error) throw new Error(j.error); return j; });
+
+  function show(v) { live = v; F.forEach(f => { $('f_' + f[0]).value = ''; }); calc(); }
+  function load(keepMsg) {
+    if (!keepMsg) $('msg').textContent = 'Loading…';
+    $('save').disabled = true;
+    call({ api: 'live', date: $('date').value, shift: shift })
+      .then(v => { show(v); if (!keepMsg) $('msg').textContent = ''; $('save').disabled = false; })
+      .catch(e => { $('msg').textContent = '⚠ ' + e.message + ' – check internet and try again'; });
+  }
+
+  ['Day', 'Night'].forEach(s => $(s).onclick = () => {
+    shift = s;
+    $('Day').classList.toggle('on', s === 'Day');
+    $('Night').classList.toggle('on', s === 'Night');
+    load();
+  });
+  $('date').onchange = () => load();
+
+  $('save').onclick = () => {
+    const vals = {};
+    F.forEach(f => { const v = $('f_' + f[0]).value; if (v !== '') vals[f[0]] = v; });
+    if (!Object.keys(vals).length) { $('msg').textContent = 'Nothing to save – type at least one number.'; return; }
+    $('save').disabled = true;
+    $('msg').textContent = 'Saving…';
+    call({ api: 'add', date: $('date').value, shift: shift, vals: JSON.stringify(vals) })
+      .then(j => { show(j.live); $('msg').textContent = '✓ ' + j.message; $('save').disabled = false; })
+      .catch(e => { $('msg').textContent = '⚠ ' + e.message + ' – NOT saved, try again'; $('save').disabled = false; });
+  };
+  setTab('p');
+  load();
+</script>
+</body>
+</html>
